@@ -41,13 +41,15 @@ pub async fn track_secondary_authors() -> Result<()> {
     let args = Args::from_args();
     let client = OnlineClient::<utils::AvailConfig>::from_url(args.ws.clone()).await?;
 
+    info!("Connection established to {}", args.ws);
+    // Maybe listen to only finalised blocks
     let mut block_sub = client.blocks().subscribe_best().await?;
 
     let mut last_slot = None;
 
     while let Some(block) = block_sub.next().await {
         let block_hash = block?.hash();
-        // Process finalized block slot
+        // Process block slot
         process_block_slots(&client, block_hash, &mut last_slot, args.clone()).await?;
     }
 
