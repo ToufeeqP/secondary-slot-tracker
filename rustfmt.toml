@@ -1,0 +1,11 @@
+# rustfmt.toml
+
+# Set the maximum width for each line of code
+max_width = 100
+
+# Use 4 spaces for indentation
+tab_spaces = 4
+
+# Enable formatting for imports
+imports_granularity = "Crate"
+
