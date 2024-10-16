@@ -138,8 +138,8 @@ async fn find_missing_secondary_authors(
             .ok_or_else(|| anyhow::anyhow!("Failed to fetch key owner for slot: {}", slot))?;
 
         let msg = format!(
-            "Validator {} missed authoring secondary block for slot {}",
-            owner, slot
+            "Validator {} missed authoring secondary block for slot {}, detected at blockHash: {:#?}",
+            owner, slot, block_hash
         );
 
         if args.enable_slack {
