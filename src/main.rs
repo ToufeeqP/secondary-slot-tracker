@@ -119,23 +119,17 @@ async fn find_missing_secondary_authors(
     for slot in index..end_slot {
         let slot_author_index = secondary_slot_author(Slot(slot), &authorities, randomness);
 
-        let author_key = &authorities
-            .get(slot_author_index as usize)
-            .ok_or_else(|| anyhow::anyhow!("Invalid authority index"))?
-            .0
-             .0;
-
-        // Fetch the author account for this authority index
-        let owner = client
-            .storage()
-            .at(block_hash)
-            .fetch(
-                &api::storage()
-                    .session()
-                    .key_owner(BABE, author_key.0.as_slice()),
-            )
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("Failed to fetch key owner for slot: {}", slot))?;
+        let owner = match get_key_owner(client, block_hash, slot_author_index as usize).await {
+            Ok(owner) => owner,
+            Err(e) => {
+                // This should never happen, but better be cautious than sorry
+                error!(
+                    "Failed to get the owner for an auth_index {slot_author_index}: {}",
+                    e
+                );
+                "UNKNOWN_OWNER".to_owned()
+            }
+        };
 
         let msg = format!(
             "Validator {} missed authoring secondary block for slot {}, detected at blockHash: {:#?}",
@@ -162,6 +156,27 @@ fn secondary_slot_author(
     let rand = U256::from((randomness, slot).using_encoded(sp_crypto_hashing::blake2_256));
     let authorities_len = U256::from(authorities.len());
     (rand % authorities_len).as_u32()
+}
+
+/// Get the key owner account for the given authority index.
+async fn get_key_owner(
+    client: &OnlineClient<utils::AvailConfig>,
+    block_hash: H256,
+    auth_index: usize,
+) -> Result<String> {
+    // Fetch the validator authorities
+    let validators = client
+        .storage()
+        .at(block_hash)
+        .fetch(&api::storage().session().validators())
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("Failed to fetch validators"))?;
+
+    let validator = validators
+        .get(auth_index)
+        .ok_or_else(|| anyhow::anyhow!("Invalid authority index"))?;
+
+    Ok(validator.to_string())
 }
 
 async fn post_to_slack(message: &str, channel_id: &str) -> Result<()> {
