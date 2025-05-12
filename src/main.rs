@@ -1,6 +1,7 @@
 use anyhow::Result;
 use codec::Encode;
 use log::{error, info, warn};
+use paste::paste;
 use reqwest::Client;
 use serde_json::json;
 use sp_consensus_babe::{BabeAuthorityWeight, Randomness};
@@ -14,7 +15,8 @@ mod utils;
 use metadata::{
     api,
     api::runtime_types::{
-        sp_consensus_babe::app::Public, sp_consensus_slots::Slot, sp_core::crypto::KeyTypeId,
+        pallet_identity::types::Data, sp_consensus_babe::app::Public, sp_consensus_slots::Slot,
+        sp_core::crypto::KeyTypeId,
     },
 };
 
@@ -147,6 +149,26 @@ async fn find_missing_secondary_authors(
     Ok(())
 }
 
+macro_rules! match_raw_variants {
+    ($data:expr, $($n:literal),*) => {
+        paste! {
+            match $data {
+                $(
+                    Data::[<Raw $n>](arr) => Some(String::from_utf8_lossy(arr).to_string()),
+                )*
+                _ => None,
+            }
+        }
+    };
+}
+
+fn extract_raw_data(data: &Data) -> Option<String> {
+    match_raw_variants!(
+        data, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
+        24, 25, 26, 27, 28, 29, 30, 31, 32
+    )
+}
+
 /// Get the expected secondary author for the given slot and authorities.
 fn secondary_slot_author(
     slot: Slot,
@@ -164,7 +186,7 @@ async fn get_key_owner(
     block_hash: H256,
     auth_index: usize,
 ) -> Result<String> {
-    // Fetch the validator authorities
+    // Get the list of validators (stash accounts)
     let validators = client
         .storage()
         .at(block_hash)
@@ -176,7 +198,21 @@ async fn get_key_owner(
         .get(auth_index)
         .ok_or_else(|| anyhow::anyhow!("Invalid authority index"))?;
 
-    Ok(validator.to_string())
+    // Try to fetch on-chain identity from IdentityOf
+    let identity_opt = client
+        .storage()
+        .at(block_hash)
+        .fetch(&api::storage().identity().identity_of(validator.clone()))
+        .await?;
+
+    if let Some((registration, _)) = identity_opt {
+        if let Some(display) = extract_raw_data(&registration.info.display) {
+            return Ok(format!("{} [{}]", display, validator));
+        } else {
+            return Ok(format!("NO_DISPLAY [{}]", validator));
+        }
+    }
+    Ok(format!("NO_IDENT [{}]", validator))
 }
 
 async fn post_to_slack(message: &str, channel_id: &str) -> Result<()> {
