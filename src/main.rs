@@ -23,6 +23,19 @@ use metadata::{
 pub const BABE: KeyTypeId = KeyTypeId(*b"babe");
 pub const DEFAULT_CHANNEL_ID: &str = "channel-id";
 
+use std::{collections::HashMap, fs};
+
+fn load_local_map() -> HashMap<String, String> {
+    if let Ok(content) = fs::read_to_string("offchain_identities.json") {
+        // { "stash_account": "Validator Name", ... }
+        if let Ok(map) = serde_json::from_str::<HashMap<String, String>>(&content) {
+            return map;
+        }
+    }
+
+    HashMap::new()
+}
+
 #[derive(StructOpt, Clone)]
 struct Args {
     /// WebSocket URL
@@ -212,6 +225,11 @@ async fn get_key_owner(
             return Ok(format!("NO_DISPLAY [{}]", validator));
         }
     }
+    let local_map = load_local_map();
+    if let Some(local_name) = local_map.get(&validator.to_string()) {
+        return Ok(format!("{} [{}]", local_name, validator));
+    }
+
     Ok(format!("NO_IDENT [{}]", validator))
 }
 
