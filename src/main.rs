@@ -21,7 +21,6 @@ use metadata::{
 };
 
 pub const BABE: KeyTypeId = KeyTypeId(*b"babe");
-pub const DEFAULT_CHANNEL_ID: &str = "channel-id";
 
 use std::{collections::HashMap, fs};
 
@@ -38,15 +37,11 @@ fn load_local_map() -> HashMap<String, String> {
 
 #[derive(StructOpt, Clone)]
 struct Args {
-    /// WebSocket URL
-    #[structopt(short, long, default_value = "ws://127.0.0.1:9944")]
+    /// WebSocket URL (env: WS_URL)
+    #[structopt(short, long, env = "WS_URL", default_value = "ws://127.0.0.1:9944")]
     ws: String,
 
-    /// Slack channel ID
-    #[structopt(short, long, default_value = DEFAULT_CHANNEL_ID)]
-    channel_id: String,
-
-    /// Enable posting to Slack
+    /// Enable posting to Slack (webhook URL via env SLACK_WEBHOOK_URL)
     #[structopt(long)]
     enable_slack: bool,
 }
@@ -147,13 +142,13 @@ async fn find_missing_secondary_authors(
         };
 
         let msg = format!(
-            "Validator {} missed authoring secondary block for slot {}, detected at blockHash: {:#?}",
+            "Validator {} missed authoring secondary block for slot {}, detected at blockHash: {:#?} --from porto",
             owner, slot, block_hash
         );
 
         if args.enable_slack {
             info!("Slack notification is enabled");
-            post_to_slack(&msg, &args.channel_id).await?;
+            post_to_slack(&msg).await?;
         }
 
         info!("{}", msg);
@@ -233,21 +228,23 @@ async fn get_key_owner(
     Ok(format!("NO_IDENT [{}]", validator))
 }
 
-async fn post_to_slack(message: &str, channel_id: &str) -> Result<()> {
-    let slack_token = env::var("SLACK_TOKEN").unwrap_or_else(|_| "MAYBE_DEFAULT".to_string());
+async fn post_to_slack(message: &str) -> Result<()> {
+    // Slack incoming-webhook URL, injected from SSM via SLACK_WEBHOOK_URL.
+    let webhook_url = env::var("SLACK_WEBHOOK_URL").unwrap_or_default();
+    if webhook_url.is_empty() {
+        warn!("SLACK_WEBHOOK_URL not set; skipping Slack notification");
+        return Ok(());
+    }
 
     let client = Client::new();
 
-    // Define the payload for the API request
-    let payload = json!({
-        "channel": channel_id,
-        "text": message,
-    });
+    // Incoming webhooks take a simple { "text": ... } payload; the channel is
+    // fixed by the webhook itself, so no channel/token is needed here.
+    let payload = json!({ "text": message });
 
-    // Send the POST request to Slack Web API
+    // POST the message to the Slack incoming webhook
     let response = client
-        .post("https://slack.com/api/chat.postMessage")
-        .bearer_auth(slack_token)
+        .post(&webhook_url)
         .json(&payload)
         .send()
         .await?;
