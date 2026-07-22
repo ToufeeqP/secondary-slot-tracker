@@ -1,0 +1,34 @@
+# secondary-slot-tracker — Avail MAINNET deployment on porto.
+# Read-only BABE secondary-slot monitor with Slack (incoming webhook) alerts.
+# Point the mainnet porto app at this file (porto.toml path = porto.mainnet.toml).
+
+# mainnet: every write (deploy, config, secret) opens a PR that must be merged by
+# hand — nothing auto-merges. Creating the app also requires porto admin access.
+service_level = "mainnet"
+
+# Pure worker: outbound WS to the RPC + outbound Slack webhook POST. It listens on
+# nothing, BUT porto always renders a K8s Service, so a valid port is required or the
+# deploy fails (Service/containerPort of 0 is invalid). The avail-internal-apps chart
+# adds no readiness/liveness probe, so the pod is Ready regardless and this Service is
+# an inert no-op (public=false → no ingress, nothing routes to it).
+[network]
+port   = 8080
+public = false
+
+[resources]
+cpu_request    = "50m"
+cpu_limit      = "500m"
+memory_request = "128Mi"   # above porto's 64Mi default — subxt/substrate types need headroom
+memory_limit   = "512Mi"
+
+[env]
+RUST_LOG = "info"
+# CONFIRM: mainnet RPC endpoint. Guessed from the turing pattern (turing-rpc.avail.so).
+# Replace with the real mainnet or internal in-cluster RPC if it differs.
+WS_URL   = "wss://mainnet-rpc.avail.so/ws"
+
+# Slack incoming-webhook URL from AWS SSM Parameter Store (mainnet path). porto wraps
+# it in ref+awsssm:// at deploy (value never passes through porto). The SSM parameter
+# MUST exist before deploy or vals resolution fails — comment out for a log-only push.
+[secrets]
+SLACK_WEBHOOK_URL = "/porto/mainnet/secondary-slot-tracker/slack-webhook-url"
