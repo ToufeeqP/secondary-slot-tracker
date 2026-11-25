@@ -11,6 +11,7 @@ use structopt::StructOpt;
 use subxt::{utils::H256, OnlineClient};
 
 mod metadata;
+mod status;
 mod utils;
 use metadata::{
     api,
@@ -41,6 +42,10 @@ struct Args {
     #[structopt(short, long, env = "WS_URL", default_value = "ws://127.0.0.1:9944")]
     ws: String,
 
+    /// HTTP status server bind address (env: STATUS_ADDR)
+    #[structopt(long, env = "STATUS_ADDR", default_value = "0.0.0.0:8080")]
+    status_addr: std::net::SocketAddr,
+
     /// Enable posting to Slack (webhook URL via env SLACK_WEBHOOK_URL)
     #[structopt(long)]
     enable_slack: bool,
@@ -49,6 +54,16 @@ struct Args {
 /// Track secondary slot authors
 pub async fn track_secondary_authors() -> Result<()> {
     let args = Args::from_args();
+    let status = status::TrackerStatus::default();
+    let listener = tokio::net::TcpListener::bind(args.status_addr).await?;
+    info!("Status server listening on {}", listener.local_addr()?);
+    tokio::select! {
+        result = status::serve(listener, status.clone()) => result,
+        result = track_blocks(args, status) => result,
+    }
+}
+
+async fn track_blocks(args: Args, status: status::TrackerStatus) -> Result<()> {
     let client = OnlineClient::<utils::AvailConfig>::from_url(args.ws.clone()).await?;
 
     info!("Connection established to {}", args.ws);
@@ -58,12 +73,15 @@ pub async fn track_secondary_authors() -> Result<()> {
     let mut last_slot = None;
 
     while let Some(block) = block_sub.next().await {
-        let block_hash = block?.hash();
+        let block = block?;
+        let block_hash = block.hash();
+        let block_number = block.number();
         // Process block slot
-        process_block_slots(&client, block_hash, &mut last_slot, args.clone()).await?;
+        let slot = process_block_slots(&client, block_hash, &mut last_slot, args.clone()).await?;
+        status.record(block_number, block_hash, slot.0).await;
     }
 
-    Ok(())
+    anyhow::bail!("Block subscription ended unexpectedly")
 }
 
 /// Process a block and compare its slot with the last known slot to find missing slots.
@@ -72,7 +90,7 @@ async fn process_block_slots(
     block_hash: H256,
     last_slot: &mut Option<Slot>,
     args: Args,
-) -> Result<()> {
+) -> Result<Slot> {
     // Fetch the current slot for the finalized block
     let current_slot = client
         .storage()
@@ -94,9 +112,9 @@ async fn process_block_slots(
     }
 
     // Update the last_slot with the current slot
-    *last_slot = Some(current_slot);
+    *last_slot = Some(current_slot.clone());
 
-    Ok(())
+    Ok(current_slot)
 }
 
 /// Find secondary authors for any missing slots between two given slots.
@@ -243,11 +261,7 @@ async fn post_to_slack(message: &str) -> Result<()> {
     let payload = json!({ "text": message });
 
     // POST the message to the Slack incoming webhook
-    let response = client
-        .post(&webhook_url)
-        .json(&payload)
-        .send()
-        .await?;
+    let response = client.post(&webhook_url).json(&payload).send().await?;
 
     let status = response.status();
     if status.is_success() {

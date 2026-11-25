@@ -80,3 +80,39 @@ Example:
 export SLACK_TOKEN="your-slack-token"
 ./target/release/secondary-slot-tracker --enable-slack --channel-id C1234567890
 ```
+
+## Tracker status
+
+The tracker serves HTTP on `0.0.0.0:8080` by default. Override the bind address
+with `--status-addr 127.0.0.1:8080` or `STATUS_ADDR`.
+
+```bash
+curl -i http://localhost:8080/health
+```
+
+The endpoint returns JSON, for example:
+
+```json
+{
+  "status": "healthy",
+  "last_tracked_block": {
+    "number": 42,
+    "hash": "0x...",
+    "slot": 123,
+    "tracked_at_unix_seconds": 1795560000,
+    "seconds_since_last_block": 3
+  }
+}
+```
+
+`/health` returns HTTP 200 after a successfully processed
+block, or 503 while starting or when no block has completed processing for 120
+seconds (`status: "stale"`). Before the first block, `status` is `"starting"`
+and `last_tracked_block` is `null`. Progress is held in memory and resets on restart.
+Blocks are recorded only after slot processing and any enabled Slack notifications
+complete. The tracker follows best blocks, so the reported block is not necessarily
+finalized and its number can move backwards during a reorganization. Fatal tracker
+or HTTP server errors stop the process; a stalled tracker continues serving its
+last recorded progress with an unhealthy response.
+
+The endpoint has no authentication; keep the port on a trusted network.

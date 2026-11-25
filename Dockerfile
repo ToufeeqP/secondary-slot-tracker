@@ -28,7 +28,8 @@ COPY --from=builder /app/target/release/secondary-slot-tracker /usr/local/bin/se
 #   SLACK_WEBHOOK_URL  Slack webhook URL  — read by post_to_slack (injected from SSM)
 # RUST_LOG below is just a fallback default.
 ENV RUST_LOG=info
-# No EXPOSE: pure worker (outbound WS + outbound Slack webhook), no inbound port.
+# HTTP /health (override bind address with STATUS_ADDR).
+EXPOSE 8080
 
 # Slack alerting is enabled for both testnet and mainnet; the per-env webhook URL
 # comes from SLACK_WEBHOOK_URL (SSM). If that env is unset the binary logs a warn

@@ -4,11 +4,8 @@
 
 service_level = "testnet"
 
-# Pure worker: outbound WS to the RPC + outbound Slack webhook POST. It listens on
-# nothing, BUT porto always renders a K8s Service, so a valid port is required or the
-# deploy fails (Service/containerPort of 0 is invalid). The avail-internal-apps chart
-# adds no readiness/liveness probe, so the pod is Ready regardless and this Service is
-# an inert no-op (public=false → no ingress, nothing routes to it).
+# Internal HTTP status server: GET /health.
+# Keep STATUS_ADDR aligned with this port if overriding the default.
 [network]
 port   = 8080
 public = false
